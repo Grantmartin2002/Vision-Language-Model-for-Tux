@@ -14,7 +14,6 @@ from .data import VQADataset, benchmark
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-256M-Instruct")
 
-
 def load(model_name: str = "vlm_model") -> BaseVLM:
     from pathlib import Path
 
@@ -266,3 +265,5 @@ if __name__ == "__main__":
     from fire import Fire
 
     Fire({"demo_train": demo_train, "train": train, "test": test_model})
+    print("using device", DEVICE)
+

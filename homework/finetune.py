@@ -263,7 +263,7 @@ def test_model(ckpt_path: str, val_dataset: str = "valid_grader"):
 
 if __name__ == "__main__":
     from fire import Fire
+    print("using device", DEVICE)
 
     Fire({"demo_train": demo_train, "train": train, "test": test_model})
-    print("using device", DEVICE)
 

@@ -165,16 +165,34 @@ def extract_kart_objects(
     detections = info["detections"][view_index]
 
     kart_objects = []
+    num_non_karts = 0
+    num_too_small = 0
+    num_out_of_bounds = 0
     for det in detections:
         # det: [class_id, instance_id, x1, y1, x2, y2]
-        _, instance_id, x1, y1, x2, y2 = det
+        object_id, instance_id, x1, y1, x2, y2 = det
+        if object_id != 1:
+            num_non_karts+=1
+            continue
+        scale_x = img_width / ORIGINAL_WIDTH
+        scale_y = img_height / ORIGINAL_HEIGHT
+
+        x1 = int(x1 * scale_x)
+        x2 = int(x2 * scale_x)
+        y1 = int(y1 * scale_y)
+        y2 = int(y2 * scale_y)
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         # Compute box width and height
         w, h = x2 - x1, y2 - y1
         # Filter out small or out-of-bounds boxes
         if w < min_box_size or h < min_box_size:
+            num_too_small+=1
             continue
         if x2 < 0 or y2 < 0 or x1 > img_width or y1 > img_height:
+            num_out_of_bounds+=1
+            if "00095" in str(info_path) and view_index==3:
+                print("out of bounds")
+                print("x2", x2, "y2", y2, "x1", x1, "y1", y1)
             continue
         # Clamp to image boundaries
         x1 = max(0, min(x1, img_width))
@@ -184,14 +202,18 @@ def extract_kart_objects(
         # Compute center
         center = ((x1 + x2) / 2, (y1 + y2) / 2)
         # Get kart name
-        kart_name = karts[instance_id] if 0 <= instance_id < len(karts) else f"id_{instance_id}"
+        kart_name = karts[instance_id] if 0 <= instance_id < len(karts) else print("FAILURE")
         kart_objects.append({
             "instance_id": instance_id,
             "kart_name": kart_name,
             "center": center,
             "is_center_kart": False,  # to be set later
         })
-
+    if len(kart_objects)==0 and "00095" in str(info_path) and view_index==3:
+        print(f"no kart objects found for img {info_path} {view_index}")
+        print("num_non_karts", num_non_karts)
+        print("num_too_small", num_too_small)
+        print("num_out_of_bounds", num_out_of_bounds)
     # Find the center kart (closest to image center)
     if kart_objects:
         img_center = np.array([img_width / 2, img_height / 2])
@@ -257,7 +279,6 @@ def generate_qa_pairs(info_path: str, view_index: int, img_width: int = 150, img
     # How many karts are behind the ego car?
     kart_objects = extract_kart_objects(info_path, view_index, img_width, img_height)
     track_name = extract_track_info(info_path)
-
     ego_kart = next((k for k in kart_objects if k["is_center_kart"]), None)
     if ego_kart is None:
         return []
@@ -293,18 +314,23 @@ def generate_qa_pairs(info_path: str, view_index: int, img_width: int = 150, img
         kart_name = kart["kart_name"]
         kart_x, kart_y = kart["center"]
         # Left or right
-        lr = "left" if kart_x < ego_x else "right"
+        lr = "left" if kart_x <= ego_x else "right"
         qa_pairs.append({
             "question": f"Is {kart_name} to the left or right of the ego car?",
             "answer": lr, 
         "image_file": image_file
         })
         # In front or behind (y axis: smaller y is 'in front' in image coordinates)
-        fb = "in front" if kart_y < ego_y else "behind"
+        fb = "front" if kart_y < ego_y else "back"
         qa_pairs.append({
             "question": f"Is {kart_name} in front of or behind the ego car?",
             "answer": fb, 
         "image_file": image_file
+        })
+        qa_pairs.append({
+            "question": f"Where is {kart_name} relative to the ego car?",
+            "answer": f"{fb} and {lr}",
+            "image_file": image_file
         })
 
     # 5. Counting questions
@@ -333,7 +359,8 @@ def generate_qa_pairs(info_path: str, view_index: int, img_width: int = 150, img
         "answer": str(behind_count), 
         "image_file": image_file
     })
-   
+    if "00095_03_im" in image_file:
+        print(qa_pairs)
     return qa_pairs
 
 
@@ -383,19 +410,58 @@ def generate_all_qa_pairs(base_folder):
     from os.path import isfile, join
     from tqdm import tqdm
     info_files = [f for f in listdir(base_folder) if isfile(join(base_folder, f)) and "_info" in f]
+    qa_pairs = []
     for info_file in tqdm(info_files, desc="Info files"):        
         for view_index in range(0, 10):
             info_path = Path(info_file)
-            base_name = info_path.stem.replace("_info", "")
-            qa_pairs = generate_qa_pairs(join(base_folder,info_file), view_index)
             # write ..._qa_pairs.json to base_folder
-            qa_pair_file = join(base_folder, f"{base_name}_{view_index:02d}_qa_pairs.json")
-            with open(qa_pair_file, "w") as f:
-                json.dump(qa_pairs, f)
+            qa_pairs.extend(generate_qa_pairs(join(base_folder,info_file), view_index))
+    qa_pair_file = join(base_folder, f"_qa_pairs.json")
+    with open(qa_pair_file, "w") as f:
+        json.dump(qa_pairs, f)
+
+def qa_pairs_accuracy(qa_pairs_path, balanced_qa_pairs_path):
+    """
+    Returns the accuracy of qa_pairs with respect to balanced_qa_pairs.
+    Only entries in balanced_qa_pairs are considered.
+    """
+    with open(qa_pairs_path, "r") as f:
+        qa_pairs = json.load(f)
+    with open(balanced_qa_pairs_path, "r") as f:
+        balanced_qa_pairs = json.load(f)
+
+    # Build a lookup for (question, image_file) -> answer in _qa_pairs
+    qa_lookup = {
+        (entry["question"], entry["image_file"]): entry["answer"]
+        for entry in qa_pairs
+    }
+
+    total = len(balanced_qa_pairs)
+    correct = 0
+
+    for entry in balanced_qa_pairs:
+        key = (entry["question"], entry["image_file"])
+        if key in qa_lookup and qa_lookup[key] == entry["answer"]:
+            correct += 1
+        else:
+            if not key in qa_lookup:
+                print(f"warning: missing {key}")
+            else:
+                answer = entry["answer"]
+                print(f"{key} answered incorrectly. Answered {qa_lookup[key]}. Reference {answer}.")
+
+    accuracy = correct / total if total > 0 else 0.0
+    print(f"{correct}/{total} correct")
+    return accuracy
+
+# Example usage:
+# acc = qa_pairs_accuracy("_qa_pairs.json", "balanced_qa_pairs.json")
+# print(f"Accuracy: {acc:.2%}")
 def main():
     fire.Fire({
     "check": check_qa_pairs,
-    "generate": generate_all_qa_pairs
+    "generate": generate_all_qa_pairs,
+    "test_generate": qa_pairs_accuracy
 })
 
 

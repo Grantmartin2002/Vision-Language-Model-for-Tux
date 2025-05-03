@@ -390,7 +390,6 @@ def generate_all_qa_pairs(base_folder):
             qa_pairs = generate_qa_pairs(join(base_folder,info_file), view_index)
             # write ..._qa_pairs.json to base_folder
             qa_pair_file = join(base_folder, f"{base_name}_{view_index:02d}_qa_pairs.json")
-            print("writing to", qa_pair_file)
             with open(qa_pair_file, "w") as f:
                 json.dump(qa_pairs, f)
 def main():

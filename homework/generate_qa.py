@@ -233,6 +233,8 @@ def generate_qa_pairs(info_path: str, view_index: int, img_width: int = 150, img
     info_path = Path(info_path)
     base_name = info_path.stem.replace("_info", "")
     data_dir = info_path.parent.parent  # e.g., .../data/train
+    print("glob", f"{base_name}_{view_index:02d}_im.jpg")
+    print("info_path", info_path)
     image_path = list(info_path.parent.glob(f"{base_name}_{view_index:02d}_im.jpg"))[0]
     image_file = image_path.relative_to(data_dir).as_posix()
     # 1. Ego car question

@@ -387,7 +387,7 @@ def generate_all_qa_pairs(base_folder):
         for view_index in range(0, 10):
             info_path = Path(info_file)
             base_name = info_path.stem.replace("_info", "")
-            qa_pairs = generate_qa_pairs(f"{base_folder}\\{info_file}", view_index)
+            qa_pairs = generate_qa_pairs(f"{base_folder}/{info_file}", view_index)
             # write ..._qa_pairs.json to base_folder
             qa_pair_file = f"{base_folder}\\{base_name}_{view_index:02d}_qa_pairs.json"
             with open(qa_pair_file, "w") as f:
